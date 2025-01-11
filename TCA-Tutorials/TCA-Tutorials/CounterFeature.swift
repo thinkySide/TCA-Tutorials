@@ -9,6 +9,12 @@ import ComposableArchitecture
 import Foundation
 
 /// Reducer 매크로? : Reducer 프로토콜에 맞게 타입을 확장해줌.
+///
+/// Reducer는 TCA에서 유일하게 기능에 대한 테스트가 필요한 단위이다.
+/// 1. Action이 전송될 때 State가 어떻게 변형되는지?
+/// 2. Effect가 어떻게 실행되어 Reducer로 다시 공급되는지?
+///
+/// TCA에서는 TestStore라는 것이 테스트를 더 쉽게 만들어 준다.
 @Reducer
 struct CounterFeature {
     
@@ -16,8 +22,10 @@ struct CounterFeature {
     /// 기능을 관찰해야 하는 경우 ObservableState 매크로 추가해 줘야 함. (보통 그럼)
     /// Observable 프로토콜을 준수하게 됨.
     /// ObservableState는 @Observable의 TCA 버전으로 struct에 맞게 조정되어 있다고 함.
+    ///
+    /// TestStore를 위해 State를 비교해야 하므로, Equatable 프로토콜 추가
     @ObservableState
-    struct State {
+    struct State: Equatable {
         var count = 0
         var fact: String?
         var isLoading = false
@@ -40,6 +48,10 @@ struct CounterFeature {
     enum CancelID {
         case timer
     }
+    
+    /// 의존성을 추가하는 방법
+    @Dependency(\.continuousClock) var clock
+    @Dependency(\.numberFact) var numberFact
     
     /// Reducer를 준수하려면 body 계산 속성을 꼭 구현해줘야 한다.
     var body: some ReducerOf<Self> {
@@ -65,10 +77,6 @@ struct CounterFeature {
                 /// 이를 통해 원하는 모든 종류의 작업을 수행할 수 있는 비동기 컨텍스트와 작업을
                 /// 시스템으로 다시 보내기 위한 핸들(send)를 제공합니다.
                 return .run { [count = state.count] send in
-                    let (data, _) = try await URLSession.shared
-                        .data(from: URL(string: "http://numbersapi.com/\(count)")!)
-                    let fact = String(decoding: data, as: UTF8.self)
-                    
                     /// 이렇게 직접 내부 속성을 업데이트 할 수 없다.
                     /// sendable 클로저가 inout state를 캡처할 수 없기 때문에
                     /// 컴파일러에서 엄격하게 적용하는 것.
@@ -76,7 +84,7 @@ struct CounterFeature {
                     // state.fact = fact
                     
                     /// 이렇게 새로운 Action을 fact를 담아 보내줘야 함.
-                    await send(.factResponse(fact))
+                    try await send(.factResponse(self.numberFact.fetch(count)))
                 }
                 
                 /// Effect에서 Reducer로 정보를 다시 공급하기 위한 Action
@@ -100,10 +108,15 @@ struct CounterFeature {
                 if state.isTimerRunning {
                     return .run { send in
                         /// 1초마다 타이머 틱 작동
-                        while true {
-                            try await Task.sleep(for: .seconds(1))
+                        for await _ in self.clock.timer(interval: .seconds(1)) {
                             await send(.timerTick)
                         }
+                        
+                        /// 기존 코드는 전역적이고 관리가 어려운 Task.sleep을 사용하고 있었음.
+                        // while true {
+                        //     try await Task.sleep(for: .seconds(1))
+                        //     await send(.timerTick)
+                        // }
                     }
                     /// Effect를 취소 가능하게 표시하게 해주는 것.
                     .cancellable(id: CancelID.timer)
