@@ -24,6 +24,9 @@ struct AddContactFeature {
         
         /// 자식 Feature가 부모에게 원하는 작업을 직접 알릴 수 있게 만들기
         /// 자식 피처가 직접 부모가 무엇을 하길 원하는지 정확히 설명할 수 있음!
+        ///
+        /// CasePathable: Delegate 작업이 수신되었을 때 추가로 assert 하기 위함.
+        @CasePathable
         enum Delegate: Equatable {
             case saveContact(Contact)
         }

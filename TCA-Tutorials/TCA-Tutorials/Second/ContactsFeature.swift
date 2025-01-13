@@ -23,6 +23,7 @@ struct ContactsFeature {
     
     @ObservableState
     struct State: Equatable {
+        var contacts: IdentifiedArrayOf<Contact> = []
         
         /// @Presents 매크로로 옵셔널 값을 유지(hold)함으로써 Feature의 State를 통합합니다.
         ///
@@ -31,23 +32,24 @@ struct ContactsFeature {
         // @Presents var addContact: AddContactFeature.State?
         // @Presents var alert: AlertState<Action.Alert>?
         @Presents var destination: Destination.State?
-        var contacts: IdentifiedArrayOf<Contact> = []
     }
     
     enum Action {
         case addButtonTapped
+        case deleteButtonTapped(id: Contact.ID)
         
         /// Feature의 Action을 함께 통합
         /// 이를 통해 부모는 자식 기능에서 전송된 모든 동작을 관찰할 수 있게 됨.
         // case addContact(PresentationAction<AddContactFeature.Action>)
         // case alert(PresentationAction<Alert>)
         case destination(PresentationAction<Destination.Action>)
-        case deleteButtonTapped(id: Contact.ID)
         
         enum Alert: Equatable {
             case confirmDeletion(id: Contact.ID)
         }
     }
+    
+    @Dependency(\.uuid) var uuid
     
     var body: some ReducerOf<Self> {
         Reduce { state, action in
@@ -55,7 +57,7 @@ struct ContactsFeature {
             case .addButtonTapped:
                 state.destination = .addContact(
                     AddContactFeature.State(
-                        contact: Contact(id: UUID(), name: "")
+                        contact: Contact(id: self.uuid(), name: "")
                     )
                 )
                 return .none
@@ -72,15 +74,7 @@ struct ContactsFeature {
                 return .none
                 
             case let .deleteButtonTapped(id: id):
-                state.destination = .alert(
-                    AlertState {
-                        TextState("Are you sure?")
-                    } actions: {
-                        ButtonState(role: .destructive, action: .confirmDeletion(id: id)) {
-                            TextState("Delete")
-                        }
-                    }
-                )
+                state.destination = .alert(.deleteConfirmation(id: id))
                 return .none
             }
         }
@@ -111,6 +105,20 @@ extension ContactsFeature {
 }
 
 extension ContactsFeature.Destination.State: Equatable {}
+
+// MARK: - AlertState
+
+extension AlertState where Action == ContactsFeature.Action.Alert {
+    static func deleteConfirmation(id: UUID) -> Self {
+        Self {
+            TextState("Are you sure?")
+        } actions: {
+            ButtonState(role: .destructive, action: .confirmDeletion(id: id)) {
+                TextState("Delete")
+            }
+        }
+    }
+}
 
 // MARK: - View
 
