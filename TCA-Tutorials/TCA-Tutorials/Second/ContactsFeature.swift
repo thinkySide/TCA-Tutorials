@@ -28,7 +28,9 @@ struct ContactsFeature {
         ///
         /// nil 값은 addContactFeature 기능이 제공되지 않는 것이고,
         /// 값이 있으면 제공됨을 나타낸다.
-        @Presents var addContact: AddContactFeature.State?
+        // @Presents var addContact: AddContactFeature.State?
+        // @Presents var alert: AlertState<Action.Alert>?
+        @Presents var destination: Destination.State?
         var contacts: IdentifiedArrayOf<Contact> = []
     }
     
@@ -37,24 +39,48 @@ struct ContactsFeature {
         
         /// Feature의 Action을 함께 통합
         /// 이를 통해 부모는 자식 기능에서 전송된 모든 동작을 관찰할 수 있게 됨.
-        case addContact(PresentationAction<AddContactFeature.Action>)
+        // case addContact(PresentationAction<AddContactFeature.Action>)
+        // case alert(PresentationAction<Alert>)
+        case destination(PresentationAction<Destination.Action>)
+        case deleteButtonTapped(id: Contact.ID)
+        
+        enum Alert: Equatable {
+            case confirmDeletion(id: Contact.ID)
+        }
     }
     
     var body: some ReducerOf<Self> {
         Reduce { state, action in
             switch action {
             case .addButtonTapped:
-                state.addContact = AddContactFeature.State(
-                    contact: .init(id: .init(), name: "")
+                state.destination = .addContact(
+                    AddContactFeature.State(
+                        contact: Contact(id: UUID(), name: "")
+                    )
                 )
                 return .none
                 
-                /// AddContact의 contact값 빼오기
-            case let .addContact(.presented(.delegate(.saveContact(contact)))):
+            case let .destination(.presented(.addContact(.delegate(.saveContact(contact))))):
                 state.contacts.append(contact)
                 return .none
                 
-            case .addContact:
+            case let .destination(.presented(.alert(.confirmDeletion(id: id)))):
+                state.contacts.remove(id: id)
+                return .none
+                
+            case .destination:
+                return .none
+                
+            case let .deleteButtonTapped(id: id):
+                state.destination = .alert(
+                    AlertState {
+                        TextState("Are you sure?")
+                    } actions: {
+                        ButtonState(role: .destructive, action: .confirmDeletion(id: id)) {
+                            TextState("Delete")
+                        }
+                    }
+                )
                 return .none
             }
         }
@@ -67,11 +93,24 @@ struct ContactsFeature {
         /// 모든 Action에서 부모 Reducer를 실행하는 새로운 Reducer가 생성됨.
         ///
         /// 또한 자식 Feature가 해제될 때 효과 취소를 자동으로 처리하고, 그 외 많은 작업을 처리함.
-        .ifLet(\.$addContact, action: \.addContact) {
-            AddContactFeature()
-        }
+        .ifLet(\.$destination, action: \.destination)
     }
 }
+
+// MARK: - Destination
+
+extension ContactsFeature {
+    
+    /// ContactFeature에서 탐색할 수 있는 모든 Feature에 대한
+    /// 도메인과 로직을 보관할 것.
+    @Reducer
+    enum Destination {
+        case addContact(AddContactFeature)
+        case alert(AlertState<ContactsFeature.Action.Alert>)
+    }
+}
+
+extension ContactsFeature.Destination.State: Equatable {}
 
 // MARK: - View
 
@@ -84,7 +123,16 @@ struct ContactsView: View {
         NavigationStack {
             List {
                 ForEach(store.contacts) { contact in
-                    Text(contact.name)
+                    HStack {
+                        Text(contact.name)
+                        Spacer()
+                        Button {
+                            store.send(.deleteButtonTapped(id: contact.id))
+                        } label: {
+                            Image(systemName: "trash")
+                                .foregroundColor(.red)
+                        }
+                    }
                 }
             }
             .navigationTitle("Contacts")
@@ -98,11 +146,12 @@ struct ContactsView: View {
         }
         /// addContact의 상태가 nil이 아니면
         /// AddContactFeature 도메인에만 Scope를 맞춘 새 Store가 생기고, 전달된다.
-        .sheet(item: $store.scope(state: \.addContact, action: \.addContact)) { addContactStore in
+        .sheet(item: $store.scope(state: \.destination?.addContact, action: \.destination.addContact)) { addContactStore in
             NavigationStack {
                 AddContactView(store: addContactStore)
             }
         }
+        .alert($store.scope(state: \.destination?.alert, action: \.destination.alert))
     }
 }
 
