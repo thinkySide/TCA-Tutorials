@@ -32,6 +32,9 @@ struct ContactsFeature {
         // @Presents var addContact: AddContactFeature.State?
         // @Presents var alert: AlertState<Action.Alert>?
         @Presents var destination: Destination.State?
+        
+        /// 스택에 푸쉬할 수 있게 만들어줌.
+        var path = StackState<ContactDetailFeature.State>()
     }
     
     enum Action {
@@ -43,6 +46,9 @@ struct ContactsFeature {
         // case addContact(PresentationAction<AddContactFeature.Action>)
         // case alert(PresentationAction<Alert>)
         case destination(PresentationAction<Destination.Action>)
+        
+        /// 스택 내부에서 발생할 수 있는 액션
+        case path(StackActionOf<ContactDetailFeature>)
         
         enum Alert: Equatable {
             case confirmDeletion(id: Contact.ID)
@@ -76,6 +82,14 @@ struct ContactsFeature {
             case let .deleteButtonTapped(id: id):
                 state.destination = .alert(.deleteConfirmation(id: id))
                 return .none
+                
+            case let .path(.element(id: id, action: .delegate(.confirmDeletion))):
+                guard let detailState = state.path[id: id] else { return .none }
+                state.contacts.remove(id: detailState.contact.id)
+                return .none
+                
+            case .path:
+                return .none
             }
         }
         /// ifLet Reducer 연산자를 활용해 Reducer를 통합
@@ -88,6 +102,9 @@ struct ContactsFeature {
         ///
         /// 또한 자식 Feature가 해제될 때 효과 취소를 자동으로 처리하고, 그 외 많은 작업을 처리함.
         .ifLet(\.$destination, action: \.destination)
+        .forEach(\.path, action: \.path) {
+            ContactDetailFeature()
+        }
     }
 }
 
@@ -128,19 +145,22 @@ struct ContactsView: View {
     @Bindable var store: StoreOf<ContactsFeature>
     
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $store.scope(state: \.path, action: \.path)) {
             List {
                 ForEach(store.contacts) { contact in
-                    HStack {
-                        Text(contact.name)
-                        Spacer()
-                        Button {
-                            store.send(.deleteButtonTapped(id: contact.id))
-                        } label: {
-                            Image(systemName: "trash")
-                                .foregroundColor(.red)
+                    NavigationLink(state: ContactDetailFeature.State(contact: contact)) {
+                        HStack {
+                            Text(contact.name)
+                            Spacer()
+                            Button {
+                                store.send(.deleteButtonTapped(id: contact.id))
+                            } label: {
+                                Image(systemName: "trash")
+                                    .foregroundColor(.red)
+                            }
                         }
                     }
+                    .buttonStyle(.borderless)
                 }
             }
             .navigationTitle("Contacts")
@@ -151,6 +171,8 @@ struct ContactsView: View {
                     Image(systemName: "plus")
                 }
             }
+        } destination: { store in
+            ContactDetailView(store: store)
         }
         /// addContact의 상태가 nil이 아니면
         /// AddContactFeature 도메인에만 Scope를 맞춘 새 Store가 생기고, 전달된다.
